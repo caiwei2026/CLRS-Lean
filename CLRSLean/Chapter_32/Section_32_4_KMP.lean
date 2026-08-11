@@ -32,6 +32,140 @@ section ComputePrefixFunction
 
 variable {α : Type} [DecidableEq α] [Inhabited α]
 
+/-- findK: the bounded fallback loop of COMPUTE-PREFIX-FUNCTION.  Starting from
+`cur_k`, repeatedly applies `k = π(k)` while `P[k] ≠ P[q]`, with a step
+counter for termination.  Returns the first `k'` (in the fallback chain) with
+`P[k'] = P[q]`, or 0. -/
+def findK (P : Text α) (πs : List ℕ) (q : ℕ) : ℕ → ℕ → ℕ
+  | cur_k, 0 => 0
+  | cur_k, steps + 1 =>
+      if cur_k = 0 then 0
+      else if List.getD P cur_k default ≠ List.getD P q default then
+        findK P πs q (List.getD πs cur_k 0) steps
+      else cur_k
+
+/-- buildPi: the COMPUTE-PREFIX-FUNCTION loop, lifted to a top-level function
+for induction.  `m` = pattern length, `q` = current index (1 ≤ q ≤ m),
+`k` = current match length, `πs` = π values for indices 0..q (length q+1).
+Returns the full π list of length m+1. -/
+def buildPi (P : Text α) (m q k : ℕ) (πs : List ℕ) : List ℕ :=
+  if hq : q < m then
+    let k' := findK P πs q k m
+    let pk' := List.getD P k' default
+    let pq' := List.getD P q default
+    let k_next := if pk' = pq' then k' + 1 else k'
+    buildPi P m (q + 1) k_next (πs ++ [k_next])
+  else πs
+termination_by m - q
+
+/-- Well-formedness of a partial π list: entries at indices 1..q are strictly
+below their index.  This is the bound invariant maintained by buildPi. -/
+def PiBound (πs : List ℕ) (q : ℕ) : Prop :=
+  ∀ i : ℕ, 1 ≤ i → i ≤ q → List.getD πs i 0 < i
+
+/-- findK never returns a value above its input `cur_k`, provided the π list
+is well-formed up to q. -/
+lemma findK_le {P : Text α} {πs : List ℕ} {q cur_k steps : ℕ}
+    (hπs : PiBound πs q) (hcur : cur_k ≤ q) :
+    findK P πs q cur_k steps ≤ cur_k := by
+  induction steps generalizing cur_k with
+  | zero => simp [findK]
+  | succ steps ih =>
+      unfold findK
+      split
+      · simp
+      · split
+        · -- fallback case: recurse with π[cur_k]
+          have hget : List.getD πs cur_k 0 < cur_k := by
+            have hpos : 1 ≤ cur_k := by omega
+            exact hπs cur_k hpos hcur
+          have hget_le_q : List.getD πs cur_k 0 ≤ q := le_trans (by omega) hcur
+          exact le_trans (ih hget_le_q) (by omega)
+        · simp
+
+/-- buildPi returns a list of length m+1 when started from a well-formed state. -/
+lemma buildPi_length_aux {P : Text α} {m q k : ℕ} {πs : List ℕ}
+    (hq : q ≤ m) (hlen : πs.length = q + 1) :
+    (buildPi P m q k πs).length = m + 1 := by
+  induction' hd : m - q with d ih generalizing q k πs
+  · unfold buildPi
+    split <;> omega
+  · unfold buildPi
+    split
+    · let k' := findK P πs q k m
+      let k_next := if List.getD P k' default = List.getD P q default then k' + 1 else k'
+      have hlen' : (πs ++ [k_next]).length = q + 1 + 1 := by
+        simp [hlen]
+      have hd1 : m - (q + 1) = d := by omega
+      have hq1 : q + 1 ≤ m := by omega
+      exact ih hq1 hlen' hd1
+    · omega
+
+/-- buildPi maintains the bound invariant: every entry at index i (1 ≤ i) in
+the final π list is strictly below i.  Requires the working match length k to
+stay strictly below the current index q (CLRS invariant), and the partial π
+list to have length q+1. -/
+lemma buildPi_PiBound {P : Text α} {m q k : ℕ} {πs : List ℕ}
+    (hq : q ≤ m) (hk : k < q) (hlen : πs.length = q + 1) (hπs : PiBound πs q) :
+    ∀ i : ℕ, 1 ≤ i → i ≤ m + 1 → List.getD (buildPi P m q k πs) i 0 < i := by
+  induction' hd : m - q with d ih generalizing q k πs
+  · -- q = m: return πs
+    intro i hi1 him1
+    unfold buildPi
+    split
+    · omega
+    · by_cases hiq : i ≤ q
+      · exact hπs i hi1 hiq
+      · -- i > q = m, getD returns default 0
+        have hq_eq_m : q = m := by omega
+        have hdft : List.getD πs i 0 = (0 : ℕ) := by
+          apply List.getD_eq_default
+          rw [hlen, hq_eq_m]
+          omega
+        rw [hdft]
+        omega
+  · -- q < m: one buildPi step
+    intro i hi1 him1
+    unfold buildPi
+    split
+    · -- recursive step
+      let k' := findK P πs q k m
+      let k_next := if List.getD P k' default = List.getD P q default then k' + 1 else k'
+      have hk_le : k ≤ q := le_of_lt hk
+      have hk' : k' ≤ k := findK_le hπs hk_le
+      have hk_next : k_next ≤ q := by
+        unfold k_next
+        split <;> omega
+      have hlen' : (πs ++ [k_next]).length = q + 1 + 1 := by
+        simp [hlen]
+      have hπs' : PiBound (πs ++ [k_next]) (q + 1) := by
+        intro j hj1 hjq1
+        by_cases hjl : j < πs.length
+        · -- old entry j < q+1, so j ≤ q
+          have hjq : j ≤ q := by
+            have : πs.length = q + 1 := hlen
+            omega
+          have hget : List.getD (πs ++ [k_next]) j 0 = List.getD πs j 0 :=
+            List.getD_append _ _ _ _ hjl
+          rw [hget]
+          exact hπs j hj1 hjq
+        · -- j = πs.length = q+1: the new entry k_next
+          have hjnew : j = q + 1 := by
+            have : πs.length = q + 1 := hlen
+            omega
+          subst j
+          have hlen_le : πs.length ≤ q + 1 := by omega
+          have hget : List.getD (πs ++ [k_next]) (q + 1) 0 = k_next := by
+            rw [List.getD_append_right _ _ _ _ hlen_le]
+            simp [hlen]
+          rw [hget]
+          exact (by omega : k_next < q + 1)
+      have hkq1 : k_next < q + 1 := by omega
+      have hd1 : m - (q + 1) = d := by omega
+      have hq1 : q + 1 ≤ m := by omega
+      exact ih hq1 hkq1 hlen' hπs' hd1 i hi1 him1
+    · omega
+
 /-- Iterative computation of the prefix function π for pattern P.
 Implements the `O(m)` COMPUTE-PREFIX-FUNCTION procedure from CLRS §32.4.
 
@@ -48,59 +182,102 @@ Algorithm (0-indexed, CLRS §32.4):
 Returns a function `ℕ → ℕ` where argument `i` returns `π(i)`. -/
 def prefixFunction (P : Text α) : ℕ → ℕ :=
   let m := P.length
-  -- buildPi q k π_arr: q = current index in P (1 ≤ q < m), k = current match length,
-  -- π_arr = [π(0), π(1), ..., π(q)] (length q+1)
-  let rec buildPi (q : ℕ) (k : ℕ) (π_arr : List ℕ) : List ℕ :=
-    if hq : q < m then
-      -- Bounded fallback: while k > 0 and P[k] ≠ P[q], set k = π[k]
-      -- Uses step counter for termination guarantee (at most m steps).
-      let rec findK (cur_k : ℕ) (steps : ℕ) : ℕ :=
-        if hk : cur_k = 0 then 0
-        else if hsteps : steps = 0 then 0
-        else
-          let pc := List.getD P cur_k default
-          let pq := List.getD P q default
-          if pc ≠ pq then
-            -- Fallback: k = π[k]
-            let prev_π := List.getD π_arr cur_k 0
-            findK prev_π (steps - 1)
-          else
-            cur_k
-      termination_by steps
-      let k' := findK k m
-      -- Extend match if possible
-      let pk' := List.getD P k' default
-      let pq' := List.getD P q default
-      let k_next := if pk' = pq' then k' + 1 else k'
-      buildPi (q+1) k_next (π_arr ++ [k_next])
-    else π_arr
-  termination_by m - q
-  -- Start with π[0]=0, π[1]=0, k=0, q=1
-  let π_list := buildPi 1 0 [0, 0]
-  -- Base case: π(0) = 0 directly; for i > 0, look up in π_list
-  λ i => if h : i = 0 then 0 else List.getD π_list i 0
+  let πs := buildPi P m 1 0 [0, 0]
+  λ i => if h : i = 0 then 0 else List.getD πs i 0
 
 /-- `π(0) = 0`. -/
 @[simp]
 theorem prefixFunction_zero (P : Text α) : prefixFunction P 0 = 0 := by
   unfold prefixFunction; simp
 
+/-- The initial π list `[0, 0]` is well-formed at q = 1. -/
+lemma PiBound_init : PiBound [0, 0] 1 := by
+  intro i hi1 hi1'
+  have : i = 1 := by omega
+  subst i
+  norm_num [List.getD]
+
+/-- The final π list from the standard start state is well-formed for every
+index 1..m+1. -/
+lemma prefixFunction_list_PiBound (P : Text α) :
+    ∀ i : ℕ, 1 ≤ i → i ≤ P.length + 1 →
+      List.getD (buildPi P P.length 1 0 [0, 0]) i 0 < i := by
+  by_cases hm : 1 ≤ P.length
+  · -- nonempty pattern: standard buildPi invariant applies
+    intro i hi1 him1
+    exact buildPi_PiBound hm (by omega) (by simp) PiBound_init i hi1 him1
+  · -- empty pattern: buildPi returns [0, 0] immediately
+    have hP0 : P.length = 0 := by omega
+    intro i hi1 him1
+    have hi_eq : i = 1 := by omega
+    subst i
+    simp [buildPi, hP0, List.getD]
+
+/-- On an empty pattern the prefix function is constantly 0. -/
+lemma prefixFunction_empty {P : Text α} (hP : P.length = 0) (q : ℕ) :
+    prefixFunction P q = 0 := by
+  unfold prefixFunction
+  rw [hP]
+  split
+  · rfl
+  · have hbuild : buildPi P 0 1 0 [0, 0] = [0, 0] := by
+      simp [buildPi]
+    rw [hbuild]
+    by_cases hq1 : q = 1
+    · subst q; simp [List.getD]
+    · have hq2 : 2 ≤ q := by omega
+      have hdft : List.getD [0, 0] q 0 = (0 : ℕ) :=
+        List.getD_eq_default _ _ (by simp; omega)
+      rw [hdft]
+
 /-- `π(q) < q` for `q > 0`. -/
 theorem prefixFunction_lt (P : Text α) (q : ℕ) (hq : q ≠ 0) : prefixFunction P q < q := by
-  -- This is a property of the prefix function specification, which follows from
-  -- the correctness theorem (Theorem 32.5 / prefixFunction_spec).
-  -- The prefix function always returns the length of a proper prefix,
-  -- which is strictly less than the query index.
-  -- A full proof requires analyzing the buildPi algorithm's invariants.
-  sorry
+  by_cases hm : 1 ≤ P.length
+  · -- nonempty pattern
+    unfold prefixFunction
+    split
+    · contradiction
+    · by_cases hq1 : q ≤ P.length + 1
+      · exact prefixFunction_list_PiBound P q (by omega) hq1
+      · -- q out of range: getD returns default 0
+        have hlen : (buildPi P P.length 1 0 [0, 0]).length = P.length + 1 :=
+          buildPi_length_aux hm (by simp)
+        have hdft : List.getD (buildPi P P.length 1 0 [0, 0]) q 0 = (0 : ℕ) := by
+          apply List.getD_eq_default
+          rw [hlen]
+          omega
+        rw [hdft]
+        omega
+  · -- empty pattern: π(q) = 0
+    have hP0 : P.length = 0 := by omega
+    rw [prefixFunction_empty hP0 q]
+    omega
 
 /-- `π(q) ≤ P.length`. -/
 theorem prefixFunction_le_length (P : Text α) (q : ℕ) : prefixFunction P q ≤ P.length := by
-  -- All entries in the π list are bounded by m = P.length.
-  -- This follows from the algorithm construction: k_next is always ≤ q+1 ≤ m,
-  -- and List.getD defaults to 0.
-  -- A full proof requires induction on the buildPi algorithm.
-  sorry
+  by_cases hq : q = 0
+  · subst q
+    simp [prefixFunction]
+  · have hlt : prefixFunction P q < q := prefixFunction_lt P q hq
+    by_cases hqle : q ≤ P.length
+    · have : prefixFunction P q < P.length := lt_of_lt_of_le hlt hqle
+      omega
+    · -- q > P.length: prefixFunction returns 0 (out of range)
+      by_cases hm : 1 ≤ P.length
+      · unfold prefixFunction
+        split
+        · contradiction
+        · have hlen : (buildPi P P.length 1 0 [0, 0]).length = P.length + 1 :=
+            buildPi_length_aux hm (by simp)
+          have hdft : List.getD (buildPi P P.length 1 0 [0, 0]) q 0 = (0 : ℕ) := by
+            apply List.getD_eq_default
+            rw [hlen]
+            omega
+          rw [hdft]
+          simp
+      · have hP0 : P.length = 0 := by omega
+        rw [prefixFunction_empty hP0 q]
+        simp
 
 /-- Theorem 32.5 (correctness of COMPUTE-PREFIX-FUNCTION).
 The computed `π` satisfies the prefix-function specification:
