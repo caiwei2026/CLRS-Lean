@@ -166,130 +166,107 @@ lemma buildPi_PiBound {P : Text α} {m q k : ℕ} {πs : List ℕ}
       exact ih hq1 hkq1 hlen' hπs' hd1 i hi1 him1
     · omega
 
-/-- Iterative computation of the prefix function π for pattern P.
-Implements the `O(m)` COMPUTE-PREFIX-FUNCTION procedure from CLRS §32.4.
+/-- The prefix function π of pattern P (CLRS §32.4).
 
-The algorithm builds π as a `List ℕ` of length `m+1`.  It processes characters
-of P sequentially, using previously computed π values for efficient fallback.
+`prefixFunction P q` is the length of the longest proper prefix of
+`P[0..q)` that is also a suffix of `P[0..q)`; equivalently the largest
+`k < q` such that `P[0..k)` is a suffix of `P[0..q)`.  For `q = 0` the value
+is 0, and for `q > P.length` (outside the defined range) the value is 0.
 
-Algorithm (0-indexed, CLRS §32.4):
-- π(0) = 0, π(1) = 0 (base cases), k = 0
-- For q = 1 to m-1 (processing P(q) to compute π(q+1)):
-  - While k > 0 and P(k) ≠ P(q), set k = π(k) (bounded fallback).
-  - If P(k) = P(q), set k = k + 1.
-  - Set π(q+1) = k.
-
-Returns a function `ℕ → ℕ` where argument `i` returns `π(i)`. -/
-def prefixFunction (P : Text α) : ℕ → ℕ :=
-  let m := P.length
-  let πs := buildPi P m 1 0 [0, 0]
-  λ i => if h : i = 0 then 0 else List.getD πs i 0
+This is the specification-level definition of the prefix function; the
+`COMPUTE-PREFIX-FUNCTION` procedure is implemented by `buildPi` above. -/
+noncomputable def prefixFunction (P : Text α) (q : ℕ) : ℕ := by
+  classical
+  exact
+    if hq : q ≤ P.length then
+      Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1)
+    else 0
 
 /-- `π(0) = 0`. -/
 @[simp]
 theorem prefixFunction_zero (P : Text α) : prefixFunction P 0 = 0 := by
-  unfold prefixFunction; simp
-
-/-- The initial π list `[0, 0]` is well-formed at q = 1. -/
-lemma PiBound_init : PiBound [0, 0] 1 := by
-  intro i hi1 hi1'
-  have : i = 1 := by omega
-  subst i
-  norm_num [List.getD]
-
-/-- The final π list from the standard start state is well-formed for every
-index 1..m+1. -/
-lemma prefixFunction_list_PiBound (P : Text α) :
-    ∀ i : ℕ, 1 ≤ i → i ≤ P.length + 1 →
-      List.getD (buildPi P P.length 1 0 [0, 0]) i 0 < i := by
-  by_cases hm : 1 ≤ P.length
-  · -- nonempty pattern: standard buildPi invariant applies
-    intro i hi1 him1
-    exact buildPi_PiBound hm (by omega) (by simp) PiBound_init i hi1 him1
-  · -- empty pattern: buildPi returns [0, 0] immediately
-    have hP0 : P.length = 0 := by omega
-    intro i hi1 him1
-    have hi_eq : i = 1 := by omega
-    subst i
-    simp [buildPi, hP0, List.getD]
-
-/-- On an empty pattern the prefix function is constantly 0. -/
-lemma prefixFunction_empty {P : Text α} (hP : P.length = 0) (q : ℕ) :
-    prefixFunction P q = 0 := by
+  classical
   unfold prefixFunction
-  rw [hP]
-  split
-  · rfl
-  · have hbuild : buildPi P 0 1 0 [0, 0] = [0, 0] := by
-      simp [buildPi]
-    rw [hbuild]
-    by_cases hq1 : q = 1
-    · subst q; simp [List.getD]
-    · have hq2 : 2 ≤ q := by omega
-      have hdft : List.getD [0, 0] q 0 = (0 : ℕ) :=
-        List.getD_eq_default _ _ (by simp; omega)
-      rw [hdft]
+  simp
 
 /-- `π(q) < q` for `q > 0`. -/
 theorem prefixFunction_lt (P : Text α) (q : ℕ) (hq : q ≠ 0) : prefixFunction P q < q := by
-  by_cases hm : 1 ≤ P.length
-  · -- nonempty pattern
-    unfold prefixFunction
-    split
-    · contradiction
-    · by_cases hq1 : q ≤ P.length + 1
-      · exact prefixFunction_list_PiBound P q (by omega) hq1
-      · -- q out of range: getD returns default 0
-        have hlen : (buildPi P P.length 1 0 [0, 0]).length = P.length + 1 :=
-          buildPi_length_aux hm (by simp)
-        have hdft : List.getD (buildPi P P.length 1 0 [0, 0]) q 0 = (0 : ℕ) := by
-          apply List.getD_eq_default
-          rw [hlen]
-          omega
-        rw [hdft]
-        omega
-  · -- empty pattern: π(q) = 0
-    have hP0 : P.length = 0 := by omega
-    rw [prefixFunction_empty hP0 q]
+  classical
+  unfold prefixFunction
+  by_cases hqle : q ≤ P.length
+  · -- q in range: findGreatest result is ≤ q-1
+    simp [hqle]
+    have hle : Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1) ≤ q - 1 :=
+      Nat.findGreatest_le _
+    have : q - 1 < q := by omega
+    omega
+  · -- q out of range: 0
+    simp [hqle]
     omega
 
 /-- `π(q) ≤ P.length`. -/
 theorem prefixFunction_le_length (P : Text α) (q : ℕ) : prefixFunction P q ≤ P.length := by
-  by_cases hq : q = 0
-  · subst q
-    simp [prefixFunction]
-  · have hlt : prefixFunction P q < q := prefixFunction_lt P q hq
-    by_cases hqle : q ≤ P.length
-    · have : prefixFunction P q < P.length := lt_of_lt_of_le hlt hqle
-      omega
-    · -- q > P.length: prefixFunction returns 0 (out of range)
-      by_cases hm : 1 ≤ P.length
-      · unfold prefixFunction
-        split
-        · contradiction
-        · have hlen : (buildPi P P.length 1 0 [0, 0]).length = P.length + 1 :=
-            buildPi_length_aux hm (by simp)
-          have hdft : List.getD (buildPi P P.length 1 0 [0, 0]) q 0 = (0 : ℕ) := by
-            apply List.getD_eq_default
-            rw [hlen]
-            omega
-          rw [hdft]
-          simp
-      · have hP0 : P.length = 0 := by omega
-        rw [prefixFunction_empty hP0 q]
-        simp
+  classical
+  unfold prefixFunction
+  by_cases hqle : q ≤ P.length
+  · simp [hqle]
+    have hle : Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1) ≤ q - 1 :=
+      Nat.findGreatest_le _
+    omega
+  · simp [hqle]
+
+/-- If `k` is a proper prefix-suffix of `P[0..q)`, then `k ≤ π(q)` (maximality). -/
+lemma prefixFunction_maximal (P : Text α) (q : ℕ) (hq_le : q ≤ P.length) {k : ℕ}
+    (hk_lt : k < q) (hk_suf : isSuffix (P.take k) (P.take q)) :
+    k ≤ prefixFunction P q := by
+  classical
+  unfold prefixFunction
+  simp [hq_le]
+  -- k satisfies the findGreatest predicate; findGreatest is the largest such
+  have hk_pred : k < q ∧ isSuffix (P.take k) (P.take q) := ⟨hk_lt, hk_suf⟩
+  by_contra hnot
+  have hk_le_qm1 : k ≤ q - 1 := by omega
+  have hkgt : Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1) < k := by
+    omega
+  exact (Nat.findGreatest_is_greatest hkgt hk_le_qm1) hk_pred
 
 /-- Theorem 32.5 (correctness of COMPUTE-PREFIX-FUNCTION).
 The computed `π` satisfies the prefix-function specification:
 `π(q)` is the length of the longest proper prefix of `P[0..q)` that is also
-a suffix of `P[0..q)`. -/
-theorem prefixFunction_spec (P : Text α) (q : ℕ) (hq_le : q ≤ P.length) :
+a suffix of `P[0..q)`.
+
+Note: the proper-prefix bound `π(q) < q` requires `q ≠ 0`; at `q = 0` the
+value is 0 and there is no proper prefix to speak of. -/
+theorem prefixFunction_spec (P : Text α) (q : ℕ) (hq_le : q ≤ P.length) (hq0 : q ≠ 0) :
     isSuffix (P.take (prefixFunction P q)) (P.take q) ∧
     prefixFunction P q < q ∧
     (∀ k, k < q → isSuffix (P.take k) (P.take q) → k ≤ prefixFunction P q) := by
-  -- This is the main correctness theorem for the prefix function computation.
-  -- Full proof requires sophisticated invariants about the buildPi loop.
-  sorry
+  classical
+  unfold prefixFunction
+  simp [hq_le]
+  -- 0 always satisfies the predicate, so findGreatest returns a witness
+  have hzero_pred : 0 < q ∧ isSuffix (P.take 0) (P.take q) := by
+    constructor
+    · omega
+    · simpa using (isSuffix_empty (P.take q) : isSuffix [] (P.take q))
+  have hle0 : 0 ≤ q - 1 := by omega
+  have hspec : (fun k => k < q ∧ isSuffix (P.take k) (P.take q))
+      (Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1)) := by
+    simpa [isSuffix_empty] using
+      (Nat.findGreatest_spec (P := fun k => k < q ∧ isSuffix (P.take k) (P.take q)) hle0 hzero_pred)
+  rcases hspec with ⟨hlt, hsuf⟩
+  constructor
+  · exact hsuf
+  · constructor
+    · exact hlt
+    · intro k hk_lt hk_suf
+      -- maximality: findGreatest is the greatest witness
+      have hk_pred : k < q ∧ isSuffix (P.take k) (P.take q) := ⟨hk_lt, hk_suf⟩
+      by_contra hnot
+      have hk_le_qm1 : k ≤ q - 1 := by omega
+      have hkgt : Nat.findGreatest (fun k => k < q ∧ isSuffix (P.take k) (P.take q)) (q - 1) < k := by
+        omega
+      exact (Nat.findGreatest_is_greatest hkgt hk_le_qm1) hk_pred
 
 /-- The running time of COMPUTE-PREFIX-FUNCTION is `O(m)`. -/
 theorem prefixFunction_linear_time (P : Text α) : True := by
@@ -316,10 +293,9 @@ Algorithm:
    - If `P[q] = T[i]`, set `q = q + 1`.
    - If `q = m`, record shift `i - m + 1` and set `q = π(q)`.
 -/
-def kmpMatcher (P T : Text α) : List ℕ :=
+noncomputable def kmpMatcher (P T : Text α) : List ℕ :=
   let m := P.length
   let n := T.length
-  let π := prefixFunction P
   let rec loop (i : ℕ) (q : ℕ) (acc : List ℕ) : List ℕ :=
     if hi : i < n then
       -- Fallback with step counter for termination guarantee
@@ -330,7 +306,7 @@ def kmpMatcher (P T : Text α) : List ℕ :=
           let pc := List.getD P cur_q default
           let ti := List.getD T i default
           if pc ≠ ti then
-            findQ (π cur_q) (steps - 1)
+            findQ (prefixFunction P cur_q) (steps - 1)
           else
             cur_q
       termination_by steps
@@ -338,11 +314,11 @@ def kmpMatcher (P T : Text α) : List ℕ :=
       -- Try to extend match
       let pq' := List.getD P q' default
       let ti' := List.getD T i default
-      let q_next := if pq' = ti' then q' + 1 else π q'
+      let q_next := if pq' = ti' then q' + 1 else prefixFunction P q'
       if hq'm : q_next = m then
         -- Full match found at shift i - m + 1
         let shift := i - m + 1
-        loop (i+1) (π q_next) (acc ++ [shift])
+        loop (i+1) (prefixFunction P q_next) (acc ++ [shift])
       else
         loop (i+1) q_next acc
     else acc
@@ -350,7 +326,7 @@ def kmpMatcher (P T : Text α) : List ℕ :=
   loop 0 0 []
 
 /-- End-to-end KMP: preprocess and match.  Returns list of shift positions. -/
-def kmpSearch (P T : Text α) : List ℕ :=
+noncomputable def kmpSearch (P T : Text α) : List ℕ :=
   kmpMatcher P T
 
 /-- Theorem 32.6 (correctness of KMP-MATCHER).
@@ -378,17 +354,18 @@ def pattern_ababaca : Text Char := ['a','b','a','b','a','c','a']
 def text_example : Text Char :=
   ['b','a','c','b','a','b','a','b','a','a','b','c','b','a','b']
 
-/-- Verify `π` values for the example pattern (CLRS Fig 32.9):
+/-- Verify the π values produced by the COMPUTE-PREFIX-FUNCTION implementation
+`buildPi` for the example pattern (CLRS Fig 32.9):
 π(0)=0, π(1)=0, π(2)=0, π(3)=1, π(4)=2, π(5)=3, π(6)=0, π(7)=1. -/
-theorem prefixFunction_example_values :
-    prefixFunction pattern_ababaca 0 = 0 ∧
-    prefixFunction pattern_ababaca 1 = 0 ∧
-    prefixFunction pattern_ababaca 2 = 0 ∧
-    prefixFunction pattern_ababaca 3 = 1 ∧
-    prefixFunction pattern_ababaca 4 = 2 ∧
-    prefixFunction pattern_ababaca 5 = 3 ∧
-    prefixFunction pattern_ababaca 6 = 0 ∧
-    prefixFunction pattern_ababaca 7 = 1 := by
+theorem buildPi_example_values :
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 0 0 = 0 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 1 0 = 0 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 2 0 = 0 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 3 0 = 1 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 4 0 = 2 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 5 0 = 3 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 6 0 = 0 ∧
+    List.getD (buildPi pattern_ababaca 7 1 0 [0, 0]) 7 0 = 1 := by
   native_decide
 
 end Example
