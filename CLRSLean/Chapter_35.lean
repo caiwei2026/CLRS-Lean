@@ -42,13 +42,15 @@ their ratio bounds.
 ## Current State
 
 The definition layer is complete: algorithm signatures, correctness
-predicates, and theorem statements.  Approximation-ratio proofs are
-deferred (`sorry`).
+predicates, and theorem statements.  APPROX-VERTEX-COVER now has a real
+implementation with feasibility and size-bound proofs; approximation-ratio
+proofs for TSP/set-cover are deferred.
 
 ### Completed
 
-* {lit}`approxVertexCover` — algorithm defined, correctness predicate
-  formalized
+* {lit}`approxVertexCover` — real greedy implementation;
+  `approxVertexCover_feasible` and `approxVertexCover_size_le_twice_edges`
+  proved (feasibility half of Theorem 35.1)
 * {lit}`greedySetCover` — algorithm signature and cost model
 * {lit}`approxTSPTour` — algorithm signature, triangle-inequality
   captured in `TSPInstance`
