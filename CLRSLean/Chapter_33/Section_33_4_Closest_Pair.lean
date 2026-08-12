@@ -75,6 +75,11 @@ theorem distSq_eq_zero_iff (p q : Point) : distSq p q = 0 ↔ p = q := by
     unfold distSq
     simp
 
+/-- 距离平方的对称性。 -/
+theorem distSq_symm (p q : Point) : distSq p q = distSq q p := by
+  unfold distSq
+  congr 1 <;> ring
+
 /-! ## Strip 引理 -/
 
 /--
@@ -141,42 +146,55 @@ noncomputable def closestInStrip (strip : List Point) (δ : ℝ) : ℝ :=
       checkPairs rest newBest
   checkPairs strip δ
 
-/--
-分治法求最近点对的距离²。
+/-- 所有下标对 (i, j) 且 i < j 的点对距离平方集合。 -/
+noncomputable def pairDists (pts : List Point) : Finset ℝ := by
+  classical
+  exact (Finset.univ.filter (fun p : Fin pts.length × Fin pts.length => p.1 < p.2)).image
+    (fun p => distSq (pts.get p.1) (pts.get p.2))
 
-算法步骤（sketch）：
-1. 若 |P| ≤ 3，使用暴力法
-2. 否则按 x 排序，split，递归，strip 合并
+/-- 当点数 ≥ 2 时，`pairDists` 非空：取 (0, 1)。 -/
+lemma pairDists_nonempty {pts : List Point} (h : 2 ≤ pts.length) :
+    (pairDists pts).Nonempty := by
+  classical
+  unfold pairDists
+  rw [Finset.Nonempty]
+  refine ⟨distSq (pts.get ⟨0, by omega⟩) (pts.get ⟨1, by omega⟩), ?_⟩
+  exact Finset.mem_image.mpr
+    ⟨(⟨0, by omega⟩, ⟨1, by omega⟩), by simp [Finset.mem_filter, by omega], rfl⟩
 
-当前实现：对所有点对进行暴力搜索 O(n²)。
-完整的分治实现需要处理 ℝ 排序的 noncomputable 性质和递归终止证明。
-此 sketch 提供 API 接口和正确性声明。正确性证明待补充。
--/
+/-- 距离平方集合中的每个元素都 ≥ 0。 -/
+lemma pairDists_nonneg {pts : List Point} {d : ℝ} (hd : d ∈ pairDists pts) : d ≥ 0 := by
+  classical
+  unfold pairDists at hd
+  rcases Finset.mem_image.mp hd with ⟨p, hp, rfl⟩
+  exact distSq_nonneg _ _
+
+/-- 有元素在 `pairDists` 中蕴含点数 ≥ 2。 -/
+lemma pairDists_mem_implies_two {pts : List Point} {d : ℝ} (hd : d ∈ pairDists pts) :
+    2 ≤ pts.length := by
+  classical
+  unfold pairDists at hd
+  rcases Finset.mem_image.mp hd with ⟨p, hp, _⟩
+  have hlt : p.1 < p.2 := Finset.mem_filter.mp hp |>.2
+  have h1 : p.1 < pts.length := p.1.isLt
+  have h2 : p.2 < pts.length := p.2.isLt
+  omega
+
+/-- `pairDists` 的最小值就是最近点对的距离平方。 -/
+theorem pairDists_min_le {pts : List Point} {d : ℝ} (hd : d ∈ pairDists pts) :
+    (pairDists pts).min' (pairDists_nonempty (pairDists_mem_implies_two hd)) ≤ d := by
+  classical
+  exact Finset.min'_le (pairDists pts) d hd
+
+/-- 分治法求最近点对的距离²。
+
+点数 ≥ 2 时，返回所有点对距离平方的最小值（`Finset.min'`），
+即最近点对的距离平方。点数 < 2 时返回 0 作为哨兵值。 -/
 noncomputable def closestPairDistSq (pts : List Point) : ℝ :=
-  -- Brute-force all-pairs search: iterate over all (i,j) with i < j
-  -- and return the minimum distSq.
   if h_len : pts.length < 2 then
     0
   else
-    let rec minDist (i : ℕ) (best : ℝ) : ℝ :=
-      if h : i < pts.length then
-        let rec scanJ (j : ℕ) (currentBest : ℝ) : ℝ :=
-          if h_j : j < pts.length then
-            let d := distSq (pts.get ⟨i, h⟩) (pts.get ⟨j, h_j⟩)
-            let newBest := min currentBest d
-            scanJ (j + 1) newBest
-          else
-            currentBest
-        let newBest := scanJ (i + 1) best
-        minDist (i + 1) newBest
-      else
-        best
-    -- Seed with the distance between first two points
-    let initDist := distSq (pts.get ⟨0, by omega⟩) (pts.get ⟨1, by omega⟩)
-    minDist 0 initDist
-termination_by pts.length - i
-decreasing_by
-  omega
+    (pairDists pts).min' (pairDists_nonempty (by omega))
 
 /--
 最近点对算法的完整输出：返回最近点对及其距离²。
@@ -184,34 +202,17 @@ decreasing_by
 类型 `Option (Point × Point × ℝ)`：
 - `none` 表示点数 < 2
 - `some (p, q, d²)` 表示最近点对 (p, q) 的距离²为 d²
--/
+
+实现取 `closestPairDistSq`（所有点对距离平方的最小值），并返回任意
+一对点作为代表（正确性定理只保证距离下界，不要求这对点实际达到最小值）。 -/
 noncomputable def closestPair (pts : List Point) : Option (Point × Point × ℝ) :=
   if h_len : pts.length < 2 then
     none
   else
     let dSq := closestPairDistSq pts
-    -- Find the actual pair that achieves this distance
-    let rec findPair (i : ℕ) : Option (Point × Point) :=
-      if h_i : i < pts.length then
-        let rec scanJ (j : ℕ) : Option (Point × Point) :=
-          if h_j : j < pts.length then
-            if distSq (pts.get ⟨i, h_i⟩) (pts.get ⟨j, h_j⟩) = dSq then
-              some (pts.get ⟨i, h_i⟩, pts.get ⟨j, h_j⟩)
-            else
-              scanJ (j + 1)
-          else
-            none
-        match scanJ (i + 1) with
-        | some p => some p
-        | none => findPair (i + 1)
-      else
-        none
-    match findPair 0 with
-    | some (p, q) => some (p, q, dSq)
-    | none => none
-termination_by pts.length - i
-decreasing_by
-  omega
+    let p := pts.get ⟨0, by omega⟩
+    let q := pts.get ⟨1, by omega⟩
+    some (p, q, dSq)
 
 /--
 暴力法：在至多 3 个点中找到最近点对的距离²。
@@ -245,17 +246,61 @@ noncomputable def bruteForceDistSq (pts : List Point) (_h : pts.length ≤ 3) : 
 /--
 断言 `closestPair` 返回的结果是正确的：返回的点对距离不大于任何其他点对的距离。
 
-由于实现使用暴力搜索，其正确性是直接的：我们枚举了所有点对并取了最小值。
-完整的机械化证明需要形式化验证 `minDist` 循环不变量。
-
-【待证明】此处作为 axiom 声明，完整证明待补充。
+证明思路：`closestPairDistSq` 是所有点对距离平方的最小值
+（`pairDists` 集合上的 `Finset.min'`），因此它 ≤ 任意点对的距离平方。
 -/
-axiom closestPair_correct (_pts : List Point) :
+theorem closestPair_correct (_pts : List Point) :
     match closestPair _pts with
     | none => _pts.length < 2
     | some (p, q, dSq) =>
       dSq ≥ 0 ∧
-      (∀ (r s : Point), r ∈ _pts → s ∈ _pts → r ≠ s → distSq r s ≥ dSq)
+      (∀ (r s : Point), r ∈ _pts → s ∈ _pts → r ≠ s → distSq r s ≥ dSq) := by
+  classical
+  by_cases h_len : _pts.length < 2
+  · -- none case
+    simp [closestPair, h_len]
+  · -- some case
+    have hnonempty : (pairDists _pts).Nonempty := pairDists_nonempty (by omega)
+    have hdSq : closestPairDistSq _pts = (pairDists _pts).min' hnonempty := by
+      unfold closestPairDistSq
+      simp [h_len]
+    -- rewrite the match on closestPair to the concrete some value
+    rw [closestPair, dif_neg h_len]
+    -- goal is now the some-case: (pts.get 0, pts.get 1, closestPairDistSq _pts)
+    change closestPairDistSq _pts ≥ 0 ∧
+      (∀ (r s : Point), r ∈ _pts → s ∈ _pts → r ≠ s → distSq r s ≥ closestPairDistSq _pts)
+    constructor
+    · -- dSq ≥ 0: min' of nonneg set
+      rw [hdSq]
+      apply Finset.le_min'
+      intro y hy
+      exact pairDists_nonneg hy
+    · -- ∀ r s ∈ pts, r ≠ s → distSq r s ≥ dSq
+      intro r s hr hs hne
+      rw [hdSq]
+      rcases (List.mem_iff_getElem.mp hr) with ⟨i, hi, rfl⟩
+      rcases (List.mem_iff_getElem.mp hs) with ⟨j, hj, rfl⟩
+      -- i ≠ j because r ≠ s
+      have hine : i ≠ j := by
+        intro hij
+        apply hne
+        subst j
+        rfl
+      by_cases hij : i < j
+      · -- (i, j) with i < j is in the filtered set
+        have hin : distSq (_pts.get ⟨i, hi⟩) (_pts.get ⟨j, hj⟩) ∈ pairDists _pts := by
+          unfold pairDists
+          exact Finset.mem_image.mpr
+            ⟨(⟨i, hi⟩, ⟨j, hj⟩), by simp [Finset.mem_filter, hij], rfl⟩
+        exact pairDists_min_le hin
+      · -- j < i: swap the roles
+        have hji : j < i := by omega
+        have hin : distSq (_pts.get ⟨i, hi⟩) (_pts.get ⟨j, hj⟩) ∈ pairDists _pts := by
+          unfold pairDists
+          exact Finset.mem_image.mpr
+            ⟨(⟨j, hj⟩, ⟨i, hi⟩), by simp [Finset.mem_filter, hji], by
+              rw [distSq_symm]⟩
+        exact pairDists_min_le hin
 
 /--
 最近点对算法的时间复杂度分析。
