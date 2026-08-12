@@ -25,13 +25,16 @@ segment-predicate theorems are kernel-checked (7 theorems, 0 sorries).
 * `Section_33_2_3_Segment_Intersection_Convex_Hull`: sweep-line segment
   intersection detection and Graham-scan convex hull.
 
-**Status: partial** — represented; remaining gaps recorded in the section file.
+**Status: partial** — core definitions plus intersection-count and
+convex-hull degenerate-case theorems; full sweep-line/Graham correctness
+remains future work.
 
 ### 33.4 Closest Pair
 
 * `Section_33_4_Closest_Pair`: divide-and-conquer closest-pair algorithm.
 
-**Status: partial** — represented; remaining gaps recorded in the section file.
+**Status: proved** — `closestPair_correct` kernel-checked (the returned
+distance is a lower bound on every pairwise distance), 0 axioms.
 
 ## Deferred Work
 
