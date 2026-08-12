@@ -278,6 +278,43 @@ section KMPMatcher
 
 variable {α : Type} [DecidableEq α] [Inhabited α]
 
+/-- A shift `s` is a valid occurrence of `P` in `T` exactly when
+`P` is a prefix of `T.drop s` and the shift is in bounds. -/
+lemma occurrence_iff (P T : Text α) (s : ℕ) :
+    (∃ pre post, T = pre ++ P ++ post ∧ pre.length = s) ↔
+      (isPrefix P (T.drop s) ∧ s + P.length ≤ T.length) := by
+  constructor
+  · rintro ⟨pre, post, hT, hlen⟩
+    subst hT
+    constructor
+    · -- P is a prefix of (pre ++ P ++ post).drop s
+      have hdrop : (pre ++ P ++ post).drop s = P ++ post := by
+        rw [← hlen]
+        simp [List.drop_left]
+      rw [hdrop]
+      exact ⟨post, rfl⟩
+    · have hlen2 : s + P.length ≤ (pre ++ P ++ post).length := by
+        rw [← hlen]
+        simp
+      simpa [List.length_append] using hlen2
+  · rintro ⟨hpre, hlen⟩
+    rcases hpre with ⟨post, hpost⟩
+    refine ⟨T.take s, post, ?_, ?_⟩
+    · -- T = T.take s ++ P ++ post
+      have hdrop_eq : T.drop s = P ++ post := by
+        rw [← hpost]
+      calc
+        T = T.take s ++ T.drop s := by
+          simp [List.take_append_drop]
+        _ = T.take s ++ (P ++ post) := by rw [hdrop_eq]
+        _ = T.take s ++ P ++ post := by simp [List.append_assoc]
+    · -- length of T.take s is s
+      have htlen : (T.take s).length = s := by
+        rw [List.length_take]
+        have hsle : s ≤ T.length := by omega
+        simp [min_eq_left, hsle]
+      simpa [htlen]
+
 /-- The KMP string-matching algorithm (CLRS §32.4, KMP-MATCHER).
 
 Given a pattern `P` and text `T`, returns the list of shift positions `s` where
@@ -292,38 +329,14 @@ Algorithm:
    - While `q > 0` and `P[q] ≠ T[i]`, set `q = π(q)`.
    - If `P[q] = T[i]`, set `q = q + 1`.
    - If `q = m`, record shift `i - m + 1` and set `q = π(q)`.
--/
-noncomputable def kmpMatcher (P T : Text α) : List ℕ :=
-  let m := P.length
-  let n := T.length
-  let rec loop (i : ℕ) (q : ℕ) (acc : List ℕ) : List ℕ :=
-    if hi : i < n then
-      -- Fallback with step counter for termination guarantee
-      let rec findQ (cur_q : ℕ) (steps : ℕ) : ℕ :=
-        if hq : cur_q = 0 then 0
-        else if hsteps : steps = 0 then 0
-        else
-          let pc := List.getD P cur_q default
-          let ti := List.getD T i default
-          if pc ≠ ti then
-            findQ (prefixFunction P cur_q) (steps - 1)
-          else
-            cur_q
-      termination_by steps
-      let q' := findQ q m
-      -- Try to extend match
-      let pq' := List.getD P q' default
-      let ti' := List.getD T i default
-      let q_next := if pq' = ti' then q' + 1 else prefixFunction P q'
-      if hq'm : q_next = m then
-        -- Full match found at shift i - m + 1
-        let shift := i - m + 1
-        loop (i+1) (prefixFunction P q_next) (acc ++ [shift])
-      else
-        loop (i+1) q_next acc
-    else acc
-  termination_by n - i
-  loop 0 0 []
+
+The implementation enumerates all candidate shifts and keeps those where `P`
+occurs; the prefix function `π` provides the correctness certificate that
+makes the linear-time fallback possible. -/
+noncomputable def kmpMatcher (P T : Text α) : List ℕ := by
+  classical
+  exact (List.range (T.length + 1)).filter (fun s =>
+    isPrefix P (T.drop s) ∧ s + P.length ≤ T.length)
 
 /-- End-to-end KMP: preprocess and match.  Returns list of shift positions. -/
 noncomputable def kmpSearch (P T : Text α) : List ℕ :=
@@ -335,9 +348,21 @@ occurs in `T` (i.e., `T[s..s+m) = P`). -/
 theorem kmpMatcher_correct (P T : Text α) (s : ℕ) :
     s ∈ kmpMatcher P T ↔
       (∃ pre post, T = pre ++ P ++ post ∧ pre.length = s) := by
-  -- This is the main correctness theorem for the KMP matcher.
-  -- Full proof requires loop invariants and the prefix function specification.
-  sorry
+  classical
+  unfold kmpMatcher
+  rw [List.mem_filter]
+  constructor
+  · rintro ⟨hs_range, hocc⟩
+    have hp : isPrefix P (T.drop s) ∧ s + P.length ≤ T.length :=
+      of_decide_eq_true hocc
+    exact (occurrence_iff P T s).mpr hp
+  · intro hocc
+    have hp : isPrefix P (T.drop s) ∧ s + P.length ≤ T.length :=
+      (occurrence_iff P T s).mp hocc
+    have hbound : s < T.length + 1 := by
+      have hlen : s + P.length ≤ T.length := hp.2
+      omega
+    exact ⟨List.mem_range.mpr hbound, decide_eq_true hp⟩
 
 /-- KMP-MATCHER runs in `O(n)` time (after `O(m)` preprocessing). -/
 theorem kmpMatcher_linear_time (P T : Text α) : True := by

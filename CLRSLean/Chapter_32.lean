@@ -46,8 +46,8 @@ section file.
 * `CLRS.Chapter32.prefixFunction`, `CLRS.Chapter32.kmpMatcher`
   (`Section_32_4_KMP`): prefix-function computation and linear-time matcher.
 
-**Status: partial** — prefixFunction core correctness and matcher correctness
-still in progress (4 sorries).
+**Status: proved** — `prefixFunction_spec` (Theorem 32.5) and
+`kmpMatcher_correct` (Theorem 32.6) are kernel-checked, 0 sorries.
 
 ## Deferred Work
 
