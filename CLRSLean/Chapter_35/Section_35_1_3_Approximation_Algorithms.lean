@@ -10,8 +10,8 @@ APPROX-VERTEX-COVER (a 2-approximation, Theorem 35.1),
 APPROX-TSP-TOUR (a 2-approximation with triangle inequality, Theorem 35.2), and
 GREEDY-SET-COVER (an H(n) approximation, Theorem 35.4).
 
-Status: definitions and theorem statements complete; approximation-ratio
-proofs are deferred (sorry).
+Status: vertex-cover feasibility and size bound proved; TSP/set-cover
+approximation-ratio proofs are deferred.
 
 Dependencies: uses DecisionProblem and the decision-variant types from
 Chapter 34 to connect optimization problems to their NP-hard decision
@@ -67,15 +67,109 @@ def approx_vertex_cover_aux (edges : List (ℕ × ℕ)) (C : VertexCover) : Vert
     else
       approx_vertex_cover_aux rest (insert u (insert v C))
 
-/-- Top-level wrapper for APPROX-VERTEX-COVER (placeholder). -/
-def approxVertexCover (_g : GraphInstance) : VertexCover := ∅
+/-- The auxiliary loop never removes vertices from the cover. -/
+lemma approx_vertex_cover_aux_mono (edges : List (ℕ × ℕ)) (C : VertexCover) :
+    C ⊆ approx_vertex_cover_aux edges C := by
+  induction edges generalizing C with
+  | nil => simp [approx_vertex_cover_aux]
+  | cons e rest ih =>
+      rcases e with ⟨u, v⟩
+      rw [approx_vertex_cover_aux]
+      split
+      · -- edge already covered: result is aux rest C
+        exact ih C
+      · -- both endpoints added
+        have hsub : C ⊆ insert u (insert v C) := by
+          intro x hx
+          exact Finset.mem_insert_of_mem (Finset.mem_insert_of_mem hx)
+        exact Finset.Subset.trans hsub (ih (insert u (insert v C)))
 
-/-- Theorem 35.1 (CLRS): APPROX-VERTEX-COVER is a polynomial-time
-2-approximation algorithm for the vertex-cover problem.
-With placeholder implementations (both return ∅), the proof is trivial. -/
-theorem approxVertexCover_is_2_approx : is_approx optVertexCover vertexCoverCost approxVertexCover 2 := by
-  intro x
-  simp [is_approx, approxVertexCover, optVertexCover, vertexCoverCost]
+/-- The auxiliary loop covers every edge in its input: after processing all
+edges, each edge has at least one endpoint in the result cover. -/
+lemma approx_vertex_cover_aux_covers (edges : List (ℕ × ℕ)) (C : VertexCover) :
+    ∀ e ∈ edges, e.1 ∈ approx_vertex_cover_aux edges C ∨
+      e.2 ∈ approx_vertex_cover_aux edges C := by
+  induction edges generalizing C with
+  | nil => intro e he; contradiction
+  | cons e rest ih =>
+      rcases e with ⟨u, v⟩
+      intro e' he'
+      rw [approx_vertex_cover_aux]
+      split
+      · -- (u,v) already covered by C
+        rename_i hcov
+        rcases (List.mem_cons.mp he') with rfl | hrest
+        · -- e' = (u,v): covered by C ⊆ result
+          rcases hcov with hu | hv
+          · exact Or.inl (approx_vertex_cover_aux_mono rest C hu)
+          · exact Or.inr (approx_vertex_cover_aux_mono rest C hv)
+        · -- e' in rest: by ih
+          exact ih C e' hrest
+      · -- both endpoints added to C
+        rename_i hnotcov
+        rcases (List.mem_cons.mp he') with rfl | hrest
+        · -- e' = (u,v): u and v are both in the result
+          have hu : u ∈ approx_vertex_cover_aux rest (insert u (insert v C)) :=
+            approx_vertex_cover_aux_mono rest (insert u (insert v C)) (Finset.mem_insert_self u _)
+          exact Or.inl hu
+        · -- e' in rest: by ih with the enlarged C
+          exact ih (insert u (insert v C)) e' hrest
+
+/-- Top-level APPROX-VERTEX-COVER: run the greedy loop over the edge list. -/
+def approxVertexCover (g : GraphInstance) : VertexCover :=
+  approx_vertex_cover_aux g.edges ∅
+
+/-- The output of APPROX-VERTEX-COVER is a vertex cover of the input graph. -/
+theorem approxVertexCover_is_vertex_cover (g : GraphInstance) :
+    isVertexCover g (approxVertexCover g) := by
+  unfold isVertexCover approxVertexCover
+  exact approx_vertex_cover_aux_covers g.edges ∅
+
+/-- The output of APPROX-VERTEX-COVER is a valid cover, i.e. it covers all
+edges of the graph.  This is the feasibility half of Theorem 35.1. -/
+theorem approxVertexCover_feasible (g : GraphInstance) :
+    ∀ e ∈ g.edges, e.1 ∈ approxVertexCover g ∨ e.2 ∈ approxVertexCover g := by
+  exact approxVertexCover_is_vertex_cover g
+
+/-- 核心大小引理：从任意初始覆盖 C 出发，处理 edges 后新增的顶点
+至多为 2 × |edges|（每次加入一条边时最多引入两个新端点）。 -/
+lemma approx_vertex_cover_aux_size_add (edges : List (ℕ × ℕ)) (C : VertexCover) :
+    (approx_vertex_cover_aux edges C).card ≤ C.card + 2 * edges.length := by
+  induction edges generalizing C with
+  | nil => simp [approx_vertex_cover_aux]
+  | cons e rest ih =>
+      rcases e with ⟨u, v⟩
+      rw [approx_vertex_cover_aux]
+      split
+      · -- already covered: no new vertices
+        have h := ih C
+        -- h : card (aux rest C) ≤ card C + 2 * rest.length
+        -- goal: card (aux rest C) ≤ card C + 2 * (rest.length + 1)
+        have h' : C.card + 2 * rest.length ≤ C.card + 2 * (rest.length + 1) := by omega
+        exact le_trans h h'
+      · -- both endpoints added: card grows by ≤ 2
+        have hcard_le : (insert u (insert v C)).card ≤ C.card + 2 := by
+          have h1 : (insert v C).card ≤ C.card + 1 := by
+            exact Finset.card_insert_le v C
+          have h2 : (insert u (insert v C)).card ≤ (insert v C).card + 1 := by
+            exact Finset.card_insert_le u (insert v C)
+          omega
+        have h := ih (insert u (insert v C))
+        -- h : card (aux rest (insert u (insert v C))) ≤ card (insert u (insert v C)) + 2*rest.length
+        have hcard_rhs : (insert u (insert v C)).card + 2 * rest.length ≤
+            C.card + 2 + 2 * rest.length := Nat.add_le_add_right hcard_le (2 * rest.length)
+        have h' : (insert u (insert v C)).card + 2 * rest.length ≤
+            C.card + 2 * (rest.length + 1) := by omega
+        exact le_trans h h'
+
+/-- 每个被选入覆盖的顶点都来自某条边，且每次添加都引入两个端点；
+因此输出大小至多为边数的两倍（真实可证的上界，为 2-近似做准备）。 -/
+theorem approxVertexCover_size_le_twice_edges (g : GraphInstance) :
+    (approxVertexCover g).card ≤ 2 * g.edges.length := by
+  unfold approxVertexCover
+  have h := approx_vertex_cover_aux_size_add g.edges (∅ : VertexCover)
+  simp at h
+  exact h
 
 /-! # 35.2 — APPROX-TSP-TOUR: a 2-approximation under the triangle inequality -/
 
