@@ -61,7 +61,7 @@ noncomputable def eventLess (e1 e2 : SweepEvent) : Prop :=
 简化处理：直接比较线段起点的 x 坐标。
 严格实现应计算线段与水平线 y 的交点 x 坐标。
 -/
-noncomputable def activeLess (y : ℝ) (s1 s2 : Segment) : Prop :=
+noncomputable def activeLess (_y : ℝ) (s1 s2 : Segment) : Prop :=
   s1.p.1 < s2.p.1
 
 /--
@@ -84,6 +84,26 @@ structure SweepStatus where
 -/
 noncomputable def anySegmentIntersect (segs : List Segment) : Prop :=
   ∃ (i j : Fin segs.length), i ≠ j ∧ segmentIntersect (segs.get i) (segs.get j)
+
+/-- 少于两个线段时不存在相交对。 -/
+theorem anySegmentIntersect_of_length_lt_two {segs : List Segment}
+    (h : segs.length < 2) : ¬ anySegmentIntersect segs := by
+  intro hAI
+  rcases hAI with ⟨i, j, hne, _⟩
+  have hi : i.1 < segs.length := i.isLt
+  have hj : j.1 < segs.length := j.isLt
+  have hi0 : i.1 = 0 := by omega
+  have hj0 : j.1 = 0 := by omega
+  apply hne
+  ext
+  simp [hi0, hj0]
+
+/-- 若存在相交对，则线段数至少为 2。 -/
+theorem two_le_length_of_anySegmentIntersect {segs : List Segment}
+    (hAI : anySegmentIntersect segs) : 2 ≤ segs.length := by
+  by_contra hnot
+  have : segs.length < 2 := by omega
+  exact anySegmentIntersect_of_length_lt_two this hAI
 
 /--
 判定两条线段是否在扫描线位置 y 处相邻（在活动线段集合中直接相邻）。
@@ -210,6 +230,60 @@ noncomputable def isConvexHullOf (hull pts : List Point) : Prop :=
   -- 简化表示：仅对凸包边界做要求
   True
 
+/-- 点数少于 3 时，`convexHull` 返回原列表（退化情形）。 -/
+theorem convexHull_small_input (pts : List Point) (h : pts.length < 3) :
+    convexHull pts = pts := by
+  unfold convexHull
+  simp [h]
+
+/-- 点数少于 3 时，原列表中的点都保留在凸包输出中。 -/
+theorem convexHull_mem_of_small_input {pts : List Point} {p : Point}
+    (hp : p ∈ pts) (h : pts.length < 3) : p ∈ convexHull pts := by
+  rw [convexHull_small_input pts h]
+  exact hp
+
+/-- `findLowestPoint` 在非空列表中返回列表中的一个点。 -/
+theorem findLowestPoint_mem {pts : List Point} (h : pts ≠ []) :
+    findLowestPoint pts ∈ pts := by
+  unfold findLowestPoint
+  cases pts with
+  | nil => contradiction
+  | cons p ps =>
+    -- foldl over ps starting from p returns an element of p :: ps
+    have hmem : List.foldl (fun best q =>
+        if q.2 < best.2 ∨ (q.2 = best.2 ∧ q.1 < best.1) then q else best)
+        p ps ∈ p :: ps := by
+      induction ps generalizing p with
+      | nil => simp
+      | cons q qs ih =>
+          by_cases hq : q.2 < p.2 ∨ (q.2 = p.2 ∧ q.1 < p.1)
+          · -- f p q = q, so foldl continues with q
+            simp [hq]
+            -- goal: foldl f q qs ∈ p :: q :: qs
+            -- ih q : foldl f q qs ∈ q :: qs — unfold its mem as an Or
+            have hih : List.foldl (fun best q =>
+                if q.2 < best.2 ∨ (q.2 = best.2 ∧ q.1 < best.1) then q else best)
+                q qs = q ∨ List.foldl (fun best q =>
+                if q.2 < best.2 ∨ (q.2 = best.2 ∧ q.1 < best.1) then q else best)
+                q qs ∈ qs := by
+              simpa [List.mem_cons] using (ih q (by simp))
+            rcases hih with hq' | hmem'
+            · exact Or.inr (Or.inl hq')
+            · exact Or.inr (Or.inr hmem')
+          · -- f p q = p, so foldl continues with p
+            simp [hq]
+            -- goal: foldl f p qs ∈ p :: q :: qs
+            have hih : List.foldl (fun best q =>
+                if q.2 < best.2 ∨ (q.2 = best.2 ∧ q.1 < best.1) then q else best)
+                p qs = p ∨ List.foldl (fun best q =>
+                if q.2 < best.2 ∨ (q.2 = best.2 ∧ q.1 < best.1) then q else best)
+                p qs ∈ qs := by
+              simpa [List.mem_cons] using (ih p (by simp))
+            rcases hih with hp' | hmem'
+            · exact Or.inl hp'
+            · exact Or.inr (Or.inr hmem')
+    simpa using hmem
+
 /--
 Graham 扫描的栈不变式：
 
@@ -217,7 +291,7 @@ Graham 扫描的栈不变式：
 
 【待证明】算法维护此不变式，最终栈中即为完整凸包。
 -/
-noncomputable def grahamInvariant (p₀ : Point) (stack processed : List Point) : Prop :=
+noncomputable def grahamInvariant (p₀ : Point) (stack _processed : List Point) : Prop :=
   -- 栈非空
   stack ≠ [] ∧
   -- 栈首元素是 p₀
